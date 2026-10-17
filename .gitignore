@@ -3,3 +3,15 @@
 *.swp
 solver
 mini
+
+# 暫存的組合檔,由 data.s 加組語產生
+run.s
+host/run.s
+
+# host/ 底下編出來的執行檔
+host/coords
+host/ida
+host/ida4
+host/ida5
+host/ida_bh
+host/ida_bb
