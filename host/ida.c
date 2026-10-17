@@ -1,3 +1,14 @@
+/* ida.c - 步驟三:主機上的原型(不是目標平台的程式)
+ *
+ * 用遞迴的 IDA* 和 malloc 的 BFS 驗證演算法與下界,目標平台上兩者都不允許
+ * (作業規定 no heap, no recursion);RV32I 版本見步驟四之後。
+ *
+ *   ./ida                  建表、H1/H2 檢查、抽樣驗證最優性
+ *   ./ida 21345671111111   解單一狀態(不檢查輸入)
+ *   gcc -DBREAK_H   ...    反向測試:下界故意高估,H1 必須失敗
+ *   gcc -DBREAK_BFS ...    反向測試:小 BFS 少走兩個面,H2 必須失敗
+ */     
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +22,7 @@ static const uint8_t twist[3][C] = {
     {1, 2, 0, 2, 1, 0, 0}, {0, 0, 0, 1, 2, 1, 2}, {0, 0, 0, 0, 0, 0, 0}};
 
 typedef struct {
-    uint8_t p[C], o[C];
+    uint8_t p[C], o[C]; 
 } state_t;
 
 static state_t quarter_turn(state_t s, int f)
@@ -194,6 +205,7 @@ static int check_tables(void)
 }
 
 static uint64_t nodes; /* 搜尋走進去的節點數 */
+static uint64_t children; /* 試過的 child 數(每試一個轉法算一次,被剪掉的也算) */
 static int path[12];   /* 找到的走法:face * 3 + (轉數 - 1) */
 
 /* (p,o) 能不能剛好再走 g 步解開?last = 上一步轉的面 */
@@ -209,6 +221,7 @@ static int dfs(int p, int o, int g, int last, int depth)
         for (int t = 0; t < 3; t++) { /* 90、180、270 度 */
             a = tp[f][a];
             b = to[f][b];
+            children++;
             if (h(a, b) > g - 1) /* 剩下的步數不夠:剪掉 */
                 continue;
             path[depth] = f * 3 + t;
@@ -230,14 +243,20 @@ static const char *names[9] = {"R", "R2", "R'", "B", "B2", "B'", "D", "D2", "D'"
 
 static int verify(void)
 {
-    uint64_t total = 0, worst = 0, count = 0;
+    uint64_t total = 0, worst = 0, count = 0, worst_c = 0;
+    uint32_t worst_x = 0;
     int bad = 0;
     for (uint32_t x = 0; x < N; x++) {
         if (dist[x] != 11 && x % 997) /* 所有 d11 狀態,加上每 997 個取一個 */
             continue;
         int p = x / NO, o = x % NO;
         nodes = 0;
+        children = 0;
         int len = solve(p, o);
+        if (children > worst_c) {
+            worst_c = children;
+            worst_x = x;
+        }
         for (int i = 0; i < len; i++) /* 照著解重播一次 */
             for (int k = 0; k <= path[i] % 3; k++) {
                 p = tp[path[i] / 3][p];
@@ -253,6 +272,15 @@ static int verify(void)
     printf("checked %llu states, mismatches %d, nodes mean %.0f worst %llu\n",
            (unsigned long long) count, bad, (double) total / count,
            (unsigned long long) worst);
+    state_t s;
+    unrank_perm(worst_x / NO, &s);
+    unrank_orient(worst_x % NO, &s);
+    printf("worst children %llu at state ", (unsigned long long) worst_c);
+    for (int i = 0; i < C; i++)
+        printf("%d", s.p[i] + 1);
+    for (int i = 0; i < C; i++)
+        printf("%d", s.o[i] + 1);
+    printf(" (rank %u, dist %d)\n", worst_x, dist[worst_x]);
     return bad == 0;
 }
 
@@ -303,11 +331,12 @@ int main(int argc, char **argv)
             s.o[i] = argv[1][i + C] - '1';
         }
         nodes = 0;
+        children = 0;
         int len = solve(rank_perm(&s), rank_orient(&s));
         for (int i = 0; i < len; i++)
             printf("%s%s", i ? " " : "", names[path[i]]);
-        printf("\n%d moves, %llu nodes\n", len, (unsigned long long) nodes);
-        return 0;
+        printf("\n%d moves, %llu nodes, %llu children\n", len, (unsigned long long) nodes,
+               (unsigned long long) children);        return 0;
     }
     return !verify();
 }
