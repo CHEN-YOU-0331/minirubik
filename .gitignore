@@ -15,3 +15,18 @@ host/ida4
 host/ida5
 host/ida_bh
 host/ida_bb
+# 步驟六、七的暫存檔
+one.s
+d11.s
+d11.txt
+run_d11.s
+data_bad.s
+run_bad.s
+out.txt
+expect.txt
+solver_7*.s
+host/data.s
+ref/data.s
+ref/ref.elf
+host/ida7
+demo/
