@@ -1,10 +1,11 @@
-# solver.s - 步驟七 7-B:optimal 2x2x2 solver, RV32I only, for Ripes
+# solver.s - 步驟七最終版:optimal 2x2x2 solver, RV32I only, for Ripes
 # 演算法和 host/ida5.c 的 solve_c 相同;資料(E 表、測試)來自 data.s
 # 用法:cat data.s solver.s > run.s
 #
 # 和步驟六的差別(每項都用 --iret 量過):
-#   7-A 三次轉動展開,轉到第幾次由返回位址表示,不再需要計數器
+#   7-A 三次轉動展開,轉到第幾次由程式位置表示,不再需要計數器
 #   7-B 三個面也展開,每個面的表起點固定放在 s6、s7、s8
+#   7-C 返回位址直接是「下一次轉動」的開頭,回上一層時 jr 過去,不必再跳一次
 #
 # 搜尋時的暫存器
 #   s0  q    perm 座標的 byte offset(4 * perm rank)
@@ -125,6 +126,8 @@ lehmer_next:
     beq  s1, s11, report        # 已經解開:0 步
 
     # ---- IDA*:三次轉動和三個面都展開 ----
+    # 每次轉動後,沒被剪掉就「掉進」jal 往下一層;jal 存下的返回位址
+    # 正好是下一次轉動(或下一個面)的開頭,回上一層時直接 jr 回去。
 search:
     mv   t6, s10                # 界限從 1 開始:V0 = 0x7f
 iterate:
@@ -144,7 +147,8 @@ R1:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveR1
+    bnez t0, R2             # 被剪掉:直接試下一次
+    jal  ra, enterR           # 沒被剪掉:往下一層,ra = R2
 R2:
     add  t0, s6, s0
     lw   t0, 0(t0)
@@ -154,7 +158,8 @@ R2:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveR2
+    bnez t0, R3             # 被剪掉:直接試下一次
+    jal  ra, enterR           # 沒被剪掉:往下一層,ra = R3
 R3:
     add  t0, s6, s0
     lw   t0, 0(t0)
@@ -164,7 +169,8 @@ R3:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveR3
+    bnez t0, faceB             # 被剪掉:直接試下一次
+    jal  ra, enterR           # 沒被剪掉:往下一層,ra = faceB
 faceB:
     beq  s9, s7, faceD      # 同一面不連轉
     lw   s0, 0(s5)
@@ -178,7 +184,8 @@ B1:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveB1
+    bnez t0, B2             # 被剪掉:直接試下一次
+    jal  ra, enterB           # 沒被剪掉:往下一層,ra = B2
 B2:
     add  t0, s7, s0
     lw   t0, 0(t0)
@@ -188,7 +195,8 @@ B2:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveB2
+    bnez t0, B3             # 被剪掉:直接試下一次
+    jal  ra, enterB           # 沒被剪掉:往下一層,ra = B3
 B3:
     add  t0, s7, s0
     lw   t0, 0(t0)
@@ -198,7 +206,8 @@ B3:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveB3
+    bnez t0, faceD             # 被剪掉:直接試下一次
+    jal  ra, enterB           # 沒被剪掉:往下一層,ra = faceD
 faceD:
     beq  s9, s8, node_done      # 同一面不連轉
     lw   s0, 0(s5)
@@ -212,7 +221,8 @@ D1:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveD1
+    bnez t0, D2             # 被剪掉:直接試下一次
+    jal  ra, enterD           # 沒被剪掉:往下一層,ra = D2
 D2:
     add  t0, s8, s0
     lw   t0, 0(t0)
@@ -222,7 +232,8 @@ D2:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveD2
+    bnez t0, D3             # 被剪掉:直接試下一次
+    jal  ra, enterD           # 沒被剪掉:往下一層,ra = D3
 D3:
     add  t0, s8, s0
     lw   t0, 0(t0)
@@ -232,7 +243,8 @@ D3:
     srli s1, t1, 17
     or   t0, t0, t1
     and  t0, t0, s4
-    beqz t0, liveD3
+    bnez t0, node_done             # 被剪掉:直接試下一次
+    jal  ra, enterD           # 沒被剪掉:往下一層,ra = node_done
 node_done:
     beq  s4, t6, deeper         # 根節點也試完了
     lw   s0, 0(s5)              # 回上一層:從子節點的位置接著轉
@@ -242,63 +254,35 @@ node_done:
     lw   t0, 12(s5)             # 返回位址(同時代表面和第幾次)
     lw   s9, -8(s5)             # 祖父節點轉的面(根節點讀到 guard 的 0)
     jr   t0
-liveR1:
-    jal  ra, enterR
-backR1:
-    j    R2
-liveR2:
-    jal  ra, enterR
-backR2:
-    j    R3
-liveR3:
-    jal  ra, enterR
-backR3:
-    j    faceB
-liveB1:
-    jal  ra, enterB
-backB1:
-    j    B2
-liveB2:
-    jal  ra, enterB
-backB2:
-    j    B3
-liveB3:
-    jal  ra, enterB
-backB3:
-    j    faceD
-liveD1:
-    jal  ra, enterD
-backD1:
-    j    D2
-liveD2:
-    jal  ra, enterD
-backD2:
-    j    D3
-liveD3:
-    jal  ra, enterD
-backD3:
-    j    node_done
 enterR:
     sw   s6, 8(s5)              # 記下這一步:面、返回位址
     sw   ra, 12(s5)
-    mv   s9, s6
-    j    enter
-enterB:
-    sw   s7, 8(s5)              # 記下這一步:面、返回位址
-    sw   ra, 12(s5)
-    mv   s9, s7
-    j    enter
-enterD:
-    sw   s8, 8(s5)              # 記下這一步:面、返回位址
-    sw   ra, 12(s5)
-    mv   s9, s8
-    j    enter
-enter:
     beq  s4, s10, found         # 最後一步且下界為 0:解開了
     addi s5, s5, 16             # 往下一層
     srli s4, s4, 1
     sw   s0, 0(s5)
     sw   s1, 4(s5)
+    mv   s9, s6
+    j    faceR
+enterB:
+    sw   s7, 8(s5)              # 記下這一步:面、返回位址
+    sw   ra, 12(s5)
+    beq  s4, s10, found         # 最後一步且下界為 0:解開了
+    addi s5, s5, 16             # 往下一層
+    srli s4, s4, 1
+    sw   s0, 0(s5)
+    sw   s1, 4(s5)
+    mv   s9, s7
+    j    faceR
+enterD:
+    sw   s8, 8(s5)              # 記下這一步:面、返回位址
+    sw   ra, 12(s5)
+    beq  s4, s10, found         # 最後一步且下界為 0:解開了
+    addi s5, s5, 16             # 往下一層
+    srli s4, s4, 1
+    sw   s0, 0(s5)
+    sw   s1, 4(s5)
+    mv   s9, s8
     j    faceR
 deeper:
     slli t6, t6, 1              # 界限加 1
@@ -318,20 +302,21 @@ print_move:
     ecall
 no_space:
     li   a0, 82                 # 'R'
-    la   t3, backR1
+    la   t3, R1
     beq  t1, s6, face_char
     li   a0, 66                 # 'B'
-    la   t3, backB1
+    la   t3, B1
     beq  t1, s7, face_char
     li   a0, 68                 # 'D'
-    la   t3, backD1
+    la   t3, D1
 face_char:
     li   a7, 11
     ecall
-    sub  t2, t2, t3             # 0 = 90 度,8 = 180 度,16 = 270 度(每組 live/back 佔 8 bytes)
-    beqz t2, move_done
+    sub  t2, t2, t3             # 每次轉動佔 10 個指令 = 40 bytes:40 = 90 度,80 = 180 度,120 = 270 度
+    li   t3, 40
+    beq  t2, t3, move_done      # 90 度沒有後綴
     li   a0, 50                 # '2'
-    li   t3, 8
+    li   t3, 80
     beq  t2, t3, suffix
     li   a0, 39                 # '\''
 suffix:
